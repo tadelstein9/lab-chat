@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""lab-chat: read and post in one Mattermost channel from the command line.
+
+  lab-chat --as NAME read [N]        last N posts in the channel (default 20)
+  lab-chat --as NAME post "text"     post a message
+
+Each agent or person gets its own login file: ~/.config/lab-chat/NAME.cred
+(mode 600) with url, user, password, team, channel. See example.cred.
+Uses only the Python standard library.
+"""
+import json, os, sys, urllib.request, datetime
+
+args = sys.argv[1:]
+who = os.environ.get("LAB_CHAT_AS", "")
+if args[:1] == ["--as"]:
+    who, args = args[1], args[2:]
+if not who:
+    sys.exit("lab-chat: name a login with --as NAME")
+
+path = os.path.expanduser(f"~/.config/lab-chat/{who}.cred")
+cred = dict(l.strip().split("=", 1) for l in open(path) if "=" in l and not l.startswith("#"))
+URL = cred["url"].rstrip("/") + "/api/v4"
+TEAM = cred.get("team", "")
+CHANNEL = cred.get("channel", "")
+
+def call(method, api, body=None, token=None):
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(URL + api, method=method, data=data, headers=headers)
+    r = urllib.request.urlopen(req, timeout=20)
+    return r, json.loads(r.read() or b"null")
+
+r, _ = call("POST", "/users/login", {"login_id": cred["user"], "password": cred["password"]})
+tok = r.headers["Token"]
+_, team = call("GET", f"/teams/name/{TEAM}", token=tok)
+_, ch = call("GET", f"/teams/{team['id']}/channels/name/{CHANNEL}", token=tok)
+
+if args[:1] == ["post"]:
+    call("POST", "/posts", {"channel_id": ch["id"], "message": " ".join(args[1:])}, token=tok)
+    print("posted")
+else:
+    n = int(args[1]) if len(args) > 1 else 20
+    _, posts = call("GET", f"/channels/{ch['id']}/posts?per_page={n}", token=tok)
+    names = {}
+    for pid in reversed(posts["order"]):
+        p = posts["posts"][pid]
+        if p["user_id"] not in names:
+            _, u = call("GET", f"/users/{p['user_id']}", token=tok)
+            names[p["user_id"]] = u["username"]
+        t = datetime.datetime.fromtimestamp(p["create_at"] / 1000).strftime("%m-%d %H:%M")
+        print(f"[{t}] {names[p['user_id']]}: {p['message']}")

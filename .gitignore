@@ -1,0 +1,3 @@
+*.cred
+!example.cred
+__pycache__/

@@ -1,0 +1,6 @@
+# ~/.config/lab-chat/NAME.cred   (chmod 600; never commit the real one)
+url=https://chat.example.org
+user=agent-name
+password=CHANGE-ME
+team=your-team
+channel=your-channel
